@@ -1,13 +1,12 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   RotateCcw,
   ExternalLink,
   Smartphone,
   Tablet,
   Monitor,
-  Maximize2,
-  MousePointerClick,
   Sparkles,
+  Shield,
 } from 'lucide-react';
 import { ViewportMode } from '../types';
 
@@ -24,11 +23,9 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
   viewport,
   onChangeViewport,
   isGenerating,
-  onSelectElementToPrompt,
 }) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [reloadKey, setReloadKey] = useState(0);
-  const [inspectMode, setInspectMode] = useState(false);
 
   const handleRefresh = () => {
     setReloadKey((prev) => prev + 1);
@@ -37,7 +34,8 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
   const handleOpenNewTab = () => {
     const blob = new Blob([htmlCode], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
-    window.open(url, '_blank');
+    // Explicitly set noopener,noreferrer to sever opener window access
+    window.open(url, '_blank', 'noopener,noreferrer');
   };
 
   // Viewport dimensions
@@ -60,10 +58,18 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
         <div className="flex items-center space-x-3">
           <span className="flex items-center space-x-1.5 font-medium text-slate-300">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span>Live Sandbox Preview</span>
+            <span>Live Isolated Preview</span>
           </span>
 
           <span className="text-slate-600">|</span>
+
+          {/* Sandbox Indicator badge */}
+          <div className="hidden sm:flex items-center space-x-1 text-[11px] text-slate-400" title="Rendered in an isolated null-origin sandbox without parent DOM or storage access">
+            <Shield className="w-3 h-3 text-emerald-400" />
+            <span>Sandboxed</span>
+          </div>
+
+          <span className="text-slate-600 hidden sm:inline">|</span>
 
           {/* Quick viewport pill */}
           <div className="flex items-center space-x-1">
@@ -101,10 +107,10 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
             <RotateCcw className="w-3.5 h-3.5" />
           </button>
 
-          {/* Popout in new tab */}
+          {/* Popout in new window with noopener */}
           <button
             onClick={handleOpenNewTab}
-            title="Open in new window"
+            title="Open in new window (noopener)"
             className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
           >
             <ExternalLink className="w-3.5 h-3.5" />
@@ -139,13 +145,16 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
             </div>
           )}
 
-          {/* Sandboxed iframe */}
+          {/* Sandboxed iframe:
+              Explicitly omitting allow-same-origin prevents scripts in the generated website
+              from accessing parent window DOM, parent cookies, or parent localStorage.
+          */}
           <iframe
             key={reloadKey}
             ref={iframeRef}
             srcDoc={htmlCode}
             title="Website Preview"
-            sandbox="allow-scripts allow-forms allow-modals allow-same-origin allow-popups"
+            sandbox="allow-scripts allow-forms allow-modals allow-popups"
             className="w-full h-full border-none bg-white"
           />
         </div>

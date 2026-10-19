@@ -13,34 +13,40 @@ import {
   Sparkles,
   Eye,
   EyeOff,
+  Trash2,
+  Info,
 } from 'lucide-react';
-import { AIProviderId, UserProviderSettings } from '../types';
+import { AIProviderId, PersistedPreferences } from '../types';
 import { PROVIDERS_CONFIG } from '../data/providers';
 import { testProviderConnection } from '../services/api';
 
 interface ProviderSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  settings: UserProviderSettings;
-  onSaveSettings: (settings: UserProviderSettings) => void;
+  preferences: PersistedPreferences;
+  inMemoryKeys: Record<string, string>;
+  onSave: (preferences: PersistedPreferences, inMemoryKeys: Record<string, string>) => void;
+  onClearAllKeys: () => void;
   hasServerGeminiKey: boolean;
 }
 
 export const ProviderSettingsModal: React.FC<ProviderSettingsModalProps> = ({
   isOpen,
   onClose,
-  settings,
-  onSaveSettings,
+  preferences,
+  inMemoryKeys,
+  onSave,
+  onClearAllKeys,
   hasServerGeminiKey,
 }) => {
   if (!isOpen) return null;
 
-  const [activeTab, setActiveTab] = useState<AIProviderId>(settings.activeProvider);
-  const [apiKeys, setApiKeys] = useState<Record<string, string>>({ ...settings.apiKeys });
+  const [activeTab, setActiveTab] = useState<AIProviderId>(preferences.activeProvider);
+  const [localKeys, setLocalKeys] = useState<Record<string, string>>({ ...inMemoryKeys });
   const [selectedModels, setSelectedModels] = useState<Record<string, string>>({
-    ...settings.selectedModels,
+    ...preferences.selectedModels,
   });
-  const [temperature, setTemperature] = useState(settings.temperature);
+  const [temperature, setTemperature] = useState(preferences.temperature);
   const [showKey, setShowKey] = useState<Record<string, boolean>>({});
 
   // Testing state
@@ -55,7 +61,7 @@ export const ProviderSettingsModal: React.FC<ProviderSettingsModalProps> = ({
     PROVIDERS_CONFIG.find((p) => p.id === activeTab) || PROVIDERS_CONFIG[0];
 
   const handleKeyChange = (providerId: string, val: string) => {
-    setApiKeys((prev) => ({ ...prev, [providerId]: val }));
+    setLocalKeys((prev) => ({ ...prev, [providerId]: val }));
     setTestingStatus({ loading: false });
   };
 
@@ -63,10 +69,19 @@ export const ProviderSettingsModal: React.FC<ProviderSettingsModalProps> = ({
     setSelectedModels((prev) => ({ ...prev, [providerId]: modelId }));
   };
 
+  const handleClearSingleKey = (providerId: string) => {
+    setLocalKeys((prev) => {
+      const next = { ...prev };
+      delete next[providerId];
+      return next;
+    });
+    setTestingStatus({ loading: false });
+  };
+
   const handleTestConnection = async () => {
     setTestingStatus({ loading: true });
     try {
-      const key = apiKeys[activeTab] || '';
+      const key = localKeys[activeTab] || '';
       const model = selectedModels[activeTab] || currentProviderConfig.defaultModel;
       const res = await testProviderConnection(activeTab, key, model);
 
@@ -93,19 +108,23 @@ export const ProviderSettingsModal: React.FC<ProviderSettingsModalProps> = ({
   };
 
   const handleSave = () => {
-    onSaveSettings({
-      activeProvider: activeTab,
-      apiKeys,
-      selectedModels,
-      customSystemPrompt: settings.customSystemPrompt,
-      temperature,
-    });
+    onSave(
+      {
+        activeProvider: activeTab,
+        selectedModels,
+        customSystemPrompt: preferences.customSystemPrompt,
+        temperature,
+      },
+      localKeys
+    );
     onClose();
   };
 
+  const totalKeysInMemory = Object.values(localKeys).filter(Boolean).length;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-in fade-in duration-150">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full shadow-2xl flex flex-col overflow-hidden max-h-[90vh]">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full shadow-2xl flex flex-col overflow-hidden max-h-[92vh]">
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/80">
           <div className="flex items-center space-x-2.5">
@@ -113,8 +132,8 @@ export const ProviderSettingsModal: React.FC<ProviderSettingsModalProps> = ({
               <Key className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-white">AI Provider & API Key Settings</h2>
-              <p className="text-xs text-slate-400">Choose your AI engine and control your own API credentials.</p>
+              <h2 className="text-base font-bold text-white">AI Provider & Credentials</h2>
+              <p className="text-xs text-slate-400">Manage AI engines, models, and session API credentials.</p>
             </div>
           </div>
           <button
@@ -123,6 +142,17 @@ export const ProviderSettingsModal: React.FC<ProviderSettingsModalProps> = ({
           >
             <X className="w-5 h-5" />
           </button>
+        </div>
+
+        {/* Security Notification Banner */}
+        <div className="bg-indigo-950/40 border-b border-indigo-500/20 px-6 py-2.5 text-xs text-indigo-300 flex items-start space-x-2">
+          <ShieldCheck className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+          <div className="leading-relaxed">
+            <span className="font-semibold text-white">Zero-Persistence Key Protection: </span>
+            API keys are kept strictly in application memory for your current session and are{' '}
+            <span className="font-semibold text-white">never saved to localStorage, cookies, or disk</span>.
+            If you refresh or reopen this app, you will need to re-enter your keys.
+          </div>
         </div>
 
         {/* Modal Body */}
@@ -134,7 +164,10 @@ export const ProviderSettingsModal: React.FC<ProviderSettingsModalProps> = ({
             </span>
             {PROVIDERS_CONFIG.map((p) => {
               const isSelected = activeTab === p.id;
-              const hasKey = p.id === 'builtin' || Boolean(apiKeys[p.id]) || (p.id === 'gemini' && hasServerGeminiKey);
+              const hasKey =
+                p.id === 'builtin' ||
+                Boolean(localKeys[p.id]) ||
+                (p.id === 'gemini' && hasServerGeminiKey);
               return (
                 <button
                   key={p.id}
@@ -152,7 +185,7 @@ export const ProviderSettingsModal: React.FC<ProviderSettingsModalProps> = ({
                     <span>{p.name}</span>
                   </div>
                   {hasKey ? (
-                    <span className="w-2 h-2 rounded-full bg-emerald-400" title="Key ready" />
+                    <span className="w-2 h-2 rounded-full bg-emerald-400" title="Key ready in memory" />
                   ) : (
                     <span className="text-[10px] text-amber-400 font-mono">Setup</span>
                   )}
@@ -160,9 +193,26 @@ export const ProviderSettingsModal: React.FC<ProviderSettingsModalProps> = ({
               );
             })}
 
+            {/* Memory Key Controls */}
+            {totalKeysInMemory > 0 && (
+              <div className="pt-3 border-t border-slate-800/80 mt-2 px-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLocalKeys({});
+                    onClearAllKeys();
+                  }}
+                  className="w-full py-1.5 px-2 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/20 text-[11px] font-medium transition-colors flex items-center justify-center space-x-1.5"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  <span>Clear All Keys in RAM</span>
+                </button>
+              </div>
+            )}
+
             <div className="pt-3 border-t border-slate-800/80 mt-2 px-3">
               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-2">
-                Creativity
+                Creativity / Temp
               </span>
               <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
                 <span>Temp</span>
@@ -203,12 +253,10 @@ export const ProviderSettingsModal: React.FC<ProviderSettingsModalProps> = ({
             {/* Model Selector */}
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                Selected Model
+                Selected Model (Persisted)
               </label>
               <select
-                value={
-                  selectedModels[activeTab] || currentProviderConfig.defaultModel
-                }
+                value={selectedModels[activeTab] || currentProviderConfig.defaultModel}
                 onChange={(e) => handleModelChange(activeTab, e.target.value)}
                 className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white text-xs font-medium focus:outline-none focus:border-indigo-500"
               >
@@ -225,37 +273,50 @@ export const ProviderSettingsModal: React.FC<ProviderSettingsModalProps> = ({
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-xs font-semibold text-slate-300">
-                    API Key
+                    Session API Key
                   </label>
-                  <span className="text-[11px] text-slate-500">Stored locally in your browser</span>
+                  <span className="text-[11px] text-emerald-400 font-medium">In-Memory Only</span>
                 </div>
                 <div className="relative">
                   <input
                     type={showKey[activeTab] ? 'text' : 'password'}
-                    value={apiKeys[activeTab] || ''}
+                    value={localKeys[activeTab] || ''}
                     onChange={(e) => handleKeyChange(activeTab, e.target.value)}
                     placeholder={`Enter your ${currentProviderConfig.name} API key...`}
                     className="w-full px-3 py-2 pr-20 rounded-xl bg-slate-800 border border-slate-700 text-white placeholder-slate-500 text-xs font-mono focus:outline-none focus:border-indigo-500"
                   />
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setShowKey((prev) => ({ ...prev, [activeTab]: !prev[activeTab] }))
-                    }
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1"
-                  >
-                    {showKey[activeTab] ? (
-                      <EyeOff className="w-3.5 h-3.5" />
-                    ) : (
-                      <Eye className="w-3.5 h-3.5" />
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center space-x-1">
+                    {localKeys[activeTab] && (
+                      <button
+                        type="button"
+                        onClick={() => handleClearSingleKey(activeTab)}
+                        title="Clear key from memory"
+                        className="text-slate-400 hover:text-rose-400 p-1"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     )}
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setShowKey((prev) => ({ ...prev, [activeTab]: !prev[activeTab] }))
+                      }
+                      title={showKey[activeTab] ? 'Hide key' : 'Show key'}
+                      className="text-slate-400 hover:text-white p-1"
+                    >
+                      {showKey[activeTab] ? (
+                        <EyeOff className="w-3.5 h-3.5" />
+                      ) : (
+                        <Eye className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  </div>
                 </div>
 
-                {activeTab === 'gemini' && hasServerGeminiKey && !apiKeys['gemini'] && (
+                {activeTab === 'gemini' && hasServerGeminiKey && !localKeys['gemini'] && (
                   <p className="text-[11px] text-emerald-400 mt-1 flex items-center space-x-1">
                     <CheckCircle2 className="w-3 h-3" />
-                    <span>Server default key is active. Custom key optional.</span>
+                    <span>Server default key is active. Providing your own key is optional.</span>
                   </p>
                 )}
               </div>
@@ -265,7 +326,7 @@ export const ProviderSettingsModal: React.FC<ProviderSettingsModalProps> = ({
               <div className="p-4 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-xs text-indigo-300 space-y-1">
                 <p className="font-semibold text-white">✨ Plug & Play Out of the Box</p>
                 <p>
-                  No API key required. Synthesizes bespoke HTML5, responsive Tailwind grids, and interactive JavaScript components directly in your browser.
+                  No API key required. Synthesizes bespoke HTML5, responsive Tailwind layouts, and interactive JavaScript components directly in your browser.
                 </p>
               </div>
             )}
@@ -281,7 +342,7 @@ export const ProviderSettingsModal: React.FC<ProviderSettingsModalProps> = ({
                 {testingStatus.loading ? (
                   <>
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>Pinging API...</span>
+                    <span>Testing connection...</span>
                   </>
                 ) : (
                   <>
@@ -310,7 +371,7 @@ export const ProviderSettingsModal: React.FC<ProviderSettingsModalProps> = ({
             <div className="pt-4 border-t border-slate-800 flex items-start space-x-2 text-[11px] text-slate-500">
               <ShieldCheck className="w-4 h-4 text-emerald-500 flex-shrink-0 mt-0.5" />
               <span>
-                Your API keys are never persisted to external databases or tracked. Requests are proxied securely to the AI provider.
+                Your API keys are never persisted to disk, localStorage, or cookies. When sent, they are transmitted exclusively to the designated provider gateway via server-side proxy.
               </span>
             </div>
           </div>
@@ -332,7 +393,7 @@ export const ProviderSettingsModal: React.FC<ProviderSettingsModalProps> = ({
               onClick={handleSave}
               className="px-5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/30 transition-all hover:scale-102"
             >
-              Save & Activate Provider
+              Apply Settings
             </button>
           </div>
         </div>

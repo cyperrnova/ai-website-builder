@@ -11,12 +11,23 @@ export interface ProviderConfig {
   popular?: boolean;
 }
 
-export interface UserProviderSettings {
+/**
+ * Non-secret preferences that are safe to persist in browser localStorage.
+ * API keys are strictly excluded from this interface and must never be stored on disk.
+ */
+export interface PersistedPreferences {
   activeProvider: AIProviderId;
-  apiKeys: Record<string, string>;
   selectedModels: Record<string, string>;
   customSystemPrompt: string;
   temperature: number;
+}
+
+/**
+ * Full settings representation in active memory.
+ * apiKeys is held in React state / RAM only and wiped on page refresh or explicit clearing.
+ */
+export interface UserProviderSettings extends PersistedPreferences {
+  apiKeys: Record<string, string>;
 }
 
 export type ViewportMode = 'desktop' | 'tablet' | 'mobile';

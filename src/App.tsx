@@ -4,6 +4,7 @@ import {
   ViewMode,
   StylePreset,
   Project,
+  PersistedPreferences,
   UserProviderSettings,
   Template,
   AIProviderId,
@@ -19,15 +20,15 @@ import { ProviderSettingsModal } from './components/ProviderSettingsModal';
 import { TemplatesModal } from './components/TemplatesModal';
 import { ExportModal } from './components/ExportModal';
 import { ProjectDrawer } from './components/ProjectDrawer';
-import { AlertCircle, CheckCircle2, Sparkles } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Sparkles, ShieldCheck } from 'lucide-react';
 
 const STORAGE_KEY_PROJECTS = 'ai_website_builder_projects_v2';
 const STORAGE_KEY_ACTIVE_PROJECT = 'ai_website_builder_active_id_v2';
-const STORAGE_KEY_SETTINGS = 'ai_website_builder_settings_v2';
+const STORAGE_KEY_PREFERENCES = 'ai_website_builder_preferences_v3';
+const LEGACY_STORAGE_KEY_SETTINGS = 'ai_website_builder_settings_v2';
 
-const DEFAULT_SETTINGS: UserProviderSettings = {
+const DEFAULT_PREFERENCES: PersistedPreferences = {
   activeProvider: 'builtin',
-  apiKeys: {},
   selectedModels: {
     builtin: 'smart-synthesizer-v3',
     gemini: 'gemini-3.8-flash',
@@ -66,8 +67,66 @@ function createInitialProject(): Project {
   };
 }
 
+/**
+ * Safely loads preferences from localStorage while ensuring that any previously
+ * saved API keys are strictly PURGED from persistent storage on startup.
+ */
+function loadAndSanitizePreferences(): PersistedPreferences {
+  try {
+    // 1. Check legacy storage key and purge any apiKeys found in it
+    const legacyRaw = localStorage.getItem(LEGACY_STORAGE_KEY_SETTINGS);
+    if (legacyRaw) {
+      try {
+        const parsedLegacy = JSON.parse(legacyRaw);
+        if (parsedLegacy && typeof parsedLegacy === 'object') {
+          // If the user previously had preferences under the legacy key, migrate safe fields only
+          const migrated: PersistedPreferences = {
+            activeProvider: parsedLegacy.activeProvider || DEFAULT_PREFERENCES.activeProvider,
+            selectedModels: parsedLegacy.selectedModels || DEFAULT_PREFERENCES.selectedModels,
+            customSystemPrompt: parsedLegacy.customSystemPrompt || DEFAULT_PREFERENCES.customSystemPrompt,
+            temperature:
+              typeof parsedLegacy.temperature === 'number'
+                ? parsedLegacy.temperature
+                : DEFAULT_PREFERENCES.temperature,
+          };
+          localStorage.setItem(STORAGE_KEY_PREFERENCES, JSON.stringify(migrated));
+        }
+      } catch {
+        // ignore JSON parse errors
+      }
+      // Remove legacy key from disk entirely to prevent key remnants
+      localStorage.removeItem(LEGACY_STORAGE_KEY_SETTINGS);
+    }
+
+    // 2. Load current preferences key and ensure no apiKeys are persisted
+    const saved = localStorage.getItem(STORAGE_KEY_PREFERENCES);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed && typeof parsed === 'object') {
+        // Sanitize: strip apiKeys if accidentally present
+        if ('apiKeys' in parsed) {
+          delete parsed.apiKeys;
+          localStorage.setItem(STORAGE_KEY_PREFERENCES, JSON.stringify(parsed));
+        }
+        return {
+          activeProvider: parsed.activeProvider || DEFAULT_PREFERENCES.activeProvider,
+          selectedModels: parsed.selectedModels || DEFAULT_PREFERENCES.selectedModels,
+          customSystemPrompt: parsed.customSystemPrompt || DEFAULT_PREFERENCES.customSystemPrompt,
+          temperature:
+            typeof parsed.temperature === 'number'
+              ? parsed.temperature
+              : DEFAULT_PREFERENCES.temperature,
+        };
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to load preferences from storage:', e);
+  }
+  return DEFAULT_PREFERENCES;
+}
+
 export function App() {
-  // 1. Projects State
+  // 1. Projects State (persisted safely - projects contain no keys)
   const [projects, setProjects] = useState<Project[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_PROJECTS);
@@ -87,21 +146,16 @@ export function App() {
   const currentProject =
     projects.find((p) => p.id === activeProjectId) || projects[0] || createInitialProject();
 
-  // 2. Settings State
-  const [settings, setSettings] = useState<UserProviderSettings>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_SETTINGS);
-      if (saved) return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
-    } catch (e) {
-      console.warn('Failed to load settings:', e);
-    }
-    return DEFAULT_SETTINGS;
-  });
+  // 2. Non-secret Preferences State (persisted to localStorage)
+  const [preferences, setPreferences] = useState<PersistedPreferences>(loadAndSanitizePreferences);
+
+  // 3. Sensitive API Keys State (STRICTLY IN-MEMORY ONLY - NEVER WRITTEN TO DISK OR STORAGE)
+  const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
 
   // Server health state
   const [hasServerGeminiKey, setHasServerGeminiKey] = useState(false);
 
-  // 3. UI View States
+  // 4. UI View States
   const [viewport, setViewport] = useState<ViewportMode>('desktop');
   const [viewMode, setViewMode] = useState<ViewMode>('preview');
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -127,7 +181,7 @@ export function App() {
     []
   );
 
-  // Sync to localStorage
+  // Sync projects to localStorage (projects contain only user designs, no API keys)
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(projects));
   }, [projects]);
@@ -136,17 +190,24 @@ export function App() {
     localStorage.setItem(STORAGE_KEY_ACTIVE_PROJECT, activeProjectId);
   }, [activeProjectId]);
 
+  // Sync ONLY safe non-secret preferences to localStorage
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(settings));
-  }, [settings]);
+    const safePreferences: PersistedPreferences = {
+      activeProvider: preferences.activeProvider,
+      selectedModels: preferences.selectedModels,
+      customSystemPrompt: preferences.customSystemPrompt,
+      temperature: preferences.temperature,
+    };
+    localStorage.setItem(STORAGE_KEY_PREFERENCES, JSON.stringify(safePreferences));
+  }, [preferences]);
 
-  // Check backend server on mount
+  // Check backend server capabilities on mount
   useEffect(() => {
     checkServerHealth().then((health) => {
       setHasServerGeminiKey(Boolean(health.hasServerGeminiKey));
       // If server has Gemini key and user has not configured another provider, default to gemini
-      if (health.hasServerGeminiKey && settings.activeProvider === 'builtin') {
-        setSettings((prev) => ({ ...prev, activeProvider: 'gemini' }));
+      if (health.hasServerGeminiKey && preferences.activeProvider === 'builtin') {
+        setPreferences((prev) => ({ ...prev, activeProvider: 'gemini' }));
       }
     });
   }, []);
@@ -175,7 +236,7 @@ export function App() {
     }));
   };
 
-  // Commit code version to history
+  // Commit code version to history (strictly avoids storing any keys)
   const commitCodeVersion = (
     newCode: string,
     promptText: string,
@@ -190,7 +251,6 @@ export function App() {
         provider,
       };
 
-      // Truncate history after current index
       const updatedHistory = p.history
         .slice(0, p.historyIndex + 1)
         .concat(newHistoryItem);
@@ -331,6 +391,28 @@ export function App() {
     showToast(`Loaded ${template.name}!`, 'success');
   };
 
+  // Save Settings from Modal
+  const handleSaveSettings = (
+    newPreferences: PersistedPreferences,
+    newInMemoryKeys: Record<string, string>
+  ) => {
+    setPreferences(newPreferences);
+    setApiKeys(newInMemoryKeys);
+    showToast('Settings updated! Keys stored in session memory.', 'success');
+  };
+
+  // Clear all in-memory keys
+  const handleClearAllKeys = () => {
+    setApiKeys({});
+    showToast('All API keys cleared from application memory.', 'info');
+  };
+
+  // Full in-memory settings composite
+  const combinedSettings: UserProviderSettings = {
+    ...preferences,
+    apiKeys,
+  };
+
   // AI Generation Handler
   const handleGenerate = async (
     prompt: string,
@@ -341,7 +423,7 @@ export function App() {
     try {
       const response = await generateWebsite(
         prompt,
-        settings,
+        combinedSettings,
         mode,
         currentProject.currentCode,
         stylePreset
@@ -358,7 +440,7 @@ export function App() {
         );
       }
     } catch (err: any) {
-      console.error('Generation failure:', err);
+      console.error('Generation error status:', err.message);
       showToast(err.message || 'Failed to generate website', 'error');
     } finally {
       setIsGenerating(false);
@@ -366,12 +448,13 @@ export function App() {
   };
 
   const activeProviderConfig =
-    PROVIDERS_CONFIG.find((p) => p.id === settings.activeProvider) ||
+    PROVIDERS_CONFIG.find((p) => p.id === preferences.activeProvider) ||
     PROVIDERS_CONFIG[0];
+
   const hasKey =
-    settings.activeProvider === 'builtin' ||
-    Boolean(settings.apiKeys[settings.activeProvider]) ||
-    (settings.activeProvider === 'gemini' && hasServerGeminiKey);
+    preferences.activeProvider === 'builtin' ||
+    Boolean(apiKeys[preferences.activeProvider]) ||
+    (preferences.activeProvider === 'gemini' && hasServerGeminiKey);
 
   return (
     <div className="flex flex-col h-screen w-screen bg-slate-950 text-slate-100 overflow-hidden font-sans">
@@ -418,7 +501,7 @@ export function App() {
           onOpenTemplates={() => setIsTemplatesOpen(true)}
           onOpenExport={() => setIsExportOpen(true)}
           onToggleFullscreen={() => setIsFullscreen(!isFullscreen)}
-          activeProvider={settings.activeProvider}
+          activeProvider={preferences.activeProvider}
           hasKeyForProvider={hasKey}
         />
       )}
@@ -483,8 +566,10 @@ export function App() {
       <ProviderSettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
-        settings={settings}
-        onSaveSettings={setSettings}
+        preferences={preferences}
+        inMemoryKeys={apiKeys}
+        onSave={handleSaveSettings}
+        onClearAllKeys={handleClearAllKeys}
         hasServerGeminiKey={hasServerGeminiKey}
       />
 
