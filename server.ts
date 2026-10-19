@@ -545,6 +545,25 @@ app.post('/api/generate', async (req: Request, res: Response) => {
       });
     }
 
+    // If external provider is requested without an API key, use fallback or return clear error
+    if (!keyToUse && provider !== 'builtin') {
+      if (allowFallback) {
+        const generated = generateProceduralWebsite(prompt, stylePreset, mode, currentCode);
+        return res.json({
+          code: generated.code,
+          provider: 'builtin',
+          model: 'Built-in AI Synthesizer (Fallback)',
+          fallbackNotice: `Notice: ${provider} requires an API key. Generated using Built-in AI Synthesizer so your progress is preserved. You can add your key in Provider Settings anytime.`,
+          promptTokens: Math.round(prompt.length / 3),
+          completionTokens: Math.round(generated.code.length / 4),
+        });
+      } else {
+        return res.status(400).json({
+          error: `Provider ${provider} requires an API key. Please add your key in Provider Settings or switch to Built-in AI Synthesizer.`,
+        });
+      }
+    }
+
     const systemInstruction = buildSystemPrompt(stylePreset);
     let fullPrompt = '';
 

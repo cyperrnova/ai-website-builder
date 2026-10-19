@@ -440,8 +440,12 @@ export function App() {
         );
       }
     } catch (err: any) {
-      console.error('Generation error status:', err.message);
-      showToast(err.message || 'Failed to generate website', 'error');
+      console.error('Generation error status:', err?.message);
+      const userMessage =
+        err?.message?.includes('Failed to fetch')
+          ? 'Unable to connect to generation server. Please verify the application server is running.'
+          : (err?.message || 'Failed to generate website. Please check your prompt and provider settings.');
+      showToast(userMessage, 'error');
     } finally {
       setIsGenerating(false);
     }

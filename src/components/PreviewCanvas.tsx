@@ -149,14 +149,26 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
               Explicitly omitting allow-same-origin prevents scripts in the generated website
               from accessing parent window DOM, parent cookies, or parent localStorage.
           */}
-          <iframe
-            key={reloadKey}
-            ref={iframeRef}
-            srcDoc={htmlCode}
-            title="Website Preview"
-            sandbox="allow-scripts allow-forms allow-modals allow-popups"
-            className="w-full h-full border-none bg-white"
-          />
+          {htmlCode ? (
+            <iframe
+              key={`${reloadKey}_${htmlCode.length}`}
+              ref={iframeRef}
+              srcDoc={htmlCode}
+              title="Website Preview"
+              sandbox="allow-scripts allow-forms allow-modals allow-popups"
+              className="w-full h-full border-none bg-white"
+            />
+          ) : (
+            <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center bg-slate-900 text-slate-300">
+              <div className="w-12 h-12 rounded-xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center mb-4">
+                <Sparkles className="w-6 h-6 text-indigo-400" />
+              </div>
+              <h3 className="text-base font-semibold text-white mb-1">Live Isolated Preview Ready</h3>
+              <p className="text-xs text-slate-400 max-w-sm mb-4">
+                Describe the website or web app you want to build in the prompt bar above, then click <span className="text-indigo-400 font-semibold">Create Site</span>.
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </div>
