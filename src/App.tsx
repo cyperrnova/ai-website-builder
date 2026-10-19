@@ -513,6 +513,8 @@ export function App() {
       {/* Prompt Bar */}
       {!isFullscreen && (
         <PromptBar
+          initialPrompt={currentProject.prompt}
+          projectId={currentProject.id}
           onGenerate={handleGenerate}
           isGenerating={isGenerating}
           hasExistingCode={Boolean(currentProject.currentCode)}

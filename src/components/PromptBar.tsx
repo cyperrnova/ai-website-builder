@@ -14,6 +14,8 @@ import {
 import { StylePreset } from '../types';
 
 interface PromptBarProps {
+  initialPrompt?: string;
+  projectId?: string;
   onGenerate: (prompt: string, mode: 'new' | 'edit', style: StylePreset) => Promise<void>;
   isGenerating: boolean;
   hasExistingCode: boolean;
@@ -42,6 +44,8 @@ const SUGGESTIONS = [
 ];
 
 export const PromptBar: React.FC<PromptBarProps> = ({
+  initialPrompt = '',
+  projectId,
   onGenerate,
   isGenerating,
   hasExistingCode,
@@ -49,10 +53,16 @@ export const PromptBar: React.FC<PromptBarProps> = ({
   onChangeStyle,
   activeProviderName,
 }) => {
-  const [prompt, setPrompt] = useState('');
+  const [prompt, setPrompt] = useState(initialPrompt);
   const [mode, setMode] = useState<'new' | 'edit'>(hasExistingCode ? 'edit' : 'new');
   const [validationError, setValidationError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Sync prompt and mode when active project changes
+  useEffect(() => {
+    setPrompt(initialPrompt || '');
+    setValidationError(null);
+  }, [projectId]);
 
   // Keep mode aligned if user has or clears code
   useEffect(() => {
